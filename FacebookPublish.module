@@ -1,0 +1,177 @@
+<?php
+
+/**
+ * Publishes a saved page to a Facebook page or profile
+ *
+ * Copyright (C) 2011 by Stephen Tomlinson 
+ * 
+ * http://makeinteractive.co.uk
+ *
+ */
+
+class FacebookPublish extends WireData implements Module, ConfigurableModule {
+
+	/**
+	 * Basic information about module
+	 */
+	public static function getModuleInfo() {
+
+		return array(
+			'title' => 'Facebook Publish', 
+			'version' => 001, 
+			'summary' => 'This module will post the chosen pages to a Facebook page when they are saved',
+			'singular' => true,
+			'autoload' => true, 
+			);
+	}
+	
+	/**
+	 * Default configuration for module
+	 *
+	 * This is based on Ryan's examples [used also in @apeisa's AdminBar, for instance]
+	 */
+	protected static $defaultConfigData = array(
+		'appId' => false,
+		'pageId'	=> false,
+		'token'		=> false
+	);
+	
+	/**
+	 * Populate the default config data
+	 *
+	 */
+	public function __construct() {
+	   foreach(self::$defaultConfigData as $key => $value) {
+		   $this->$key = $value;
+		   $data[$key] = $value;
+	   }
+	}
+
+	/**
+	 * Initialize the module
+	 *
+	 */
+	public function init() {
+		
+		// add a hook after the $pages->save, to issue a notice every time a page is saved
+		$this->pages->addHookAfter('save', $this, 'publish'); 
+		
+	}
+
+	/**
+	 * Publish the page to facebook
+	 *
+	 */
+	public function publish($event) {
+		
+		$page = $event->arguments[0];
+		
+		// Only work on templates specified
+		if(!$page->matches("template=news_story")) return;
+		
+		// Check if the page is new
+		//if($page->created) return;
+	
+		// Grab an access token and post to the page
+		$token = $this->getAccessToken();
+		$url = "https://graph.facebook.com/" . $this->pageId . "/links?";
+		$options = array(
+			'access_token' =>	$token,
+			'link' 		=>	$page->httpUrl,
+			'name'		=>	$page->title,
+			'caption'	=>	$page->summary
+		);
+		
+		$this->message($token);
+		
+		$result = json_decode($this->httpPost($url,$options),true);
+
+		if($result['error']) {
+			$error = $result['error'];
+			$this->error("({$error['type']}) {$error['message']}");
+		}
+		
+	}
+	
+	/**
+	 * Sent an array of options to a URL and return the result
+	 */
+	protected function httpPost($url,$options) {
+		
+		$ch = curl_init();
+		curl_setopt($ch,CURLOPT_URL,$url);
+		if($options) {
+			curl_setopt($ch,CURLOPT_POST,count($options));
+			curl_setopt($ch,CURLOPT_POSTFIELDS,http_build_query($options));
+		}
+		curl_setopt($ch,CURLOPT_RETURNTRANSFER, true);
+		$result = curl_exec($ch);
+		curl_close($ch);
+		
+		return $result;
+
+	}
+	
+	/**
+	 * Get an access token from Facebook
+	 */
+	protected function getAccessToken() {
+		
+		$options = array(
+			'grant_type'	=>	'client_credentials',
+			'client_id'		=>	$this->appId,
+			'client_secret'	=>	$this->appSecret,
+			'scope'	=>	'share_item'
+		);
+		$url = "https://graph.facebook.com/oauth/access_token?";
+		
+		$response = $this->httpPost($url,$options);
+		
+		$token = explode("=",$response);
+		$token = $token[1];
+		
+		return $token;
+		
+	}
+	
+	/**
+	 * Store details in the backend
+	 *
+	 */
+	static public function getModuleConfigInputfields(array $data) {
+
+		$inputfields = new InputfieldWrapper();
+		$inputfields->description = "Enter the details of your PayPal account below";
+		
+		$data = array_merge(self::$defaultConfigData, $data);
+
+		$f = wire('modules')->get('InputfieldText');
+		$f->attr('name', 'appId');
+		$f->attr('value', $data['appId']);
+		$f->label = "App ID";
+		$inputfields->add($f);
+		
+		$f = wire('modules')->get('InputfieldText');
+		$f->attr('name', 'appSecret');
+		$f->attr('value', $data['appSecret']);
+		$f->label = "App Secret";
+		$inputfields->add($f);
+		
+		$f = wire('modules')->get('InputfieldText');
+		$f->attr('name', 'pageId');
+		$f->attr('value', $data['pageId']);
+		$f->label = "Page ID";
+		$f->description = "The ID (or username) of the Facebook Page you would like to post updates to";
+		$inputfields->add($f);
+
+		$f = wire('modules')->get('InputfieldText');
+		$f->attr('name', 'token');
+		$f->attr('value', $data['token']);
+		$f->label = "Token";
+		$inputfields->add($f);
+
+		return $inputfields;
+
+	}
+	
+}
